@@ -36,6 +36,8 @@ export default function App({
   const [grid, setGrid] = useState<number>(defaultGrid);
   const [order, setOrder] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
+  const [otherSelections, setOtherSelections] = useState<{[playerName: string]: number | null}>({});
+  const [showCoordinates, setShowCoordinates] = useState<boolean>(true);
   const [moves, setMoves] = useState<number>(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [completedAt, setCompletedAt] = useState<number | null>(null);
@@ -176,9 +178,24 @@ export default function App({
     });
     ch.on("broadcast", { event: "swap" }, (evt) => {
       const msg = evt.payload; console.log("[rx] swap", msg);
-      if (Array.isArray(msg?.order)) { setOrder(msg.order); setMoves(msg.moves); setSelected(null); }
+      if (Array.isArray(msg?.order)) { 
+        setOrder(msg.order); 
+        setMoves(msg.moves); 
+        setSelected(null); // Clear any local selection when someone else makes a move
+        // Clear other selections when someone makes a move
+        setOtherSelections({});
+      }
     });
-    ch.on("broadcast", { event: "select" }, (evt) => { const msg = evt.payload; console.log("[rx] select", msg); setSelected(msg?.index ?? null); });
+    ch.on("broadcast", { event: "select" }, (evt) => {
+      const msg = evt.payload; console.log("[rx] select", msg);
+      if (msg?.by && msg.by !== name) { // Only track other players' selections
+        setOtherSelections(prev => ({
+          ...prev,
+          [msg.by]: msg.index
+        }));
+      }
+    });
+
     ch.on("broadcast", { event: "chat" },   (evt) => { const msg = evt.payload; console.log("[rx] chat", msg); if (msg?.message) setMessages((m) => [...m, msg.message]); });
     ch.on("broadcast", { event: "hello" },  (evt) => { const msg = evt.payload; console.log("[rx] hello", msg); if (imgUrl) { const timestamp = Date.now(); setLastStateTimestamp(timestamp); ch.send({ type: "broadcast", event: "state", payload: { type: "state", state: snapshot(), timestamp } }); } });
     ch.on("broadcast", { event: "ping" },   (evt) => { console.log("[rx] ping", evt.payload); });
@@ -295,10 +312,21 @@ export default function App({
 
   const handleTileClick = (i: number) => {
     if (solved) return;
-    if (selected === null) { setSelected(i); broadcast({ type: "select", index: i, by: name }); return; }
-    if (selected === i) { setSelected(null); broadcast({ type: "select", index: null, by: name }); return; }
-    const next = order.slice(); [next[selected], next[i]] = [next[i], next[selected]];
-    setOrder(next); setSelected(null); setMoves((m) => m + 1);
+    if (selected === null) { 
+      setSelected(i); 
+      broadcast({ type: "select", index: i, by: name });
+      return; 
+    }
+    if (selected === i) { 
+      setSelected(null); 
+      broadcast({ type: "select", index: null, by: name });
+      return; 
+    }
+    const next = order.slice(); 
+    [next[selected], next[i]] = [next[i], next[selected]];
+    setOrder(next); 
+    setSelected(null); 
+    setMoves((m) => m + 1);
     console.log("[swap]", { selected, i, orderBefore: order });
     broadcast({ type: "swap", order: next, moves: moves + 1, by: name });
   };
@@ -398,6 +426,22 @@ export default function App({
         <div className="flex items-center gap-4 mb-4">
           <div className="px-4 py-2 rounded-2xl bg-white border shadow-sm inline-flex items-center gap-2"><PlayCircle className="w-4 h-4"/> {seconds}s</div>
           <div className="px-4 py-2 rounded-2xl bg-white border shadow-sm inline-flex items-center gap-2"><GridIcon className="w-4 h-4"/> Moves: {moves}</div>
+          <div className="px-4 py-2 rounded-2xl bg-white border shadow-sm inline-flex items-center gap-2">
+            <GridIcon className="w-4 h-4"/>
+            <span className="text-sm">Coords</span>
+            <button 
+              onClick={() => setShowCoordinates(!showCoordinates)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                showCoordinates ? 'bg-indigo-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  showCoordinates ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
           {best && (<div className="px-4 py-2 rounded-2xl bg-white border shadow-sm text-sm">Best ({grid}×{grid}): {best.time}s / {best.moves} moves</div>)}
         </div>
 
@@ -434,7 +478,7 @@ export default function App({
               </div>
             </div>
           ) : (
-            <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} onTileClick={handleTileClick} />
+            <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} otherSelections={otherSelections} showCoordinates={showCoordinates} onTileClick={handleTileClick} />
           )}
         </motion.div>
 
@@ -489,22 +533,81 @@ export default function App({
   );
 }
 
-function TileGrid({ imgUrl, order, grid, selected, onTileClick }: { imgUrl: string; order: number[]; grid: number; selected: number | null; onTileClick: (i: number) => void; }) {
+function TileGrid({ imgUrl, order, grid, selected, otherSelections, showCoordinates, onTileClick }: { imgUrl: string; order: number[]; grid: number; selected: number | null; otherSelections: {[playerName: string]: number | null}; showCoordinates: boolean; onTileClick: (i: number) => void; }) {
   const tiles = order;
+  
+  // Color mapping for different players
+  const playerColors = [
+    "ring-2 ring-red-500",
+    "ring-2 ring-blue-500", 
+    "ring-2 ring-green-500",
+    "ring-2 ring-yellow-500",
+    "ring-2 ring-purple-500",
+    "ring-2 ring-pink-500"
+  ];
+  
+  // Generate coordinate labels
+  const letters = Array.from({ length: grid }, (_, i) => String.fromCharCode(65 + i)); // A, B, C, D...
+  const numbers = Array.from({ length: grid }, (_, i) => i + 1); // 1, 2, 3, 4...
+  
   return (
-    <div className="w-full h-full grid" style={{ gridTemplateColumns: `repeat(${grid}, 1fr)`, gridTemplateRows: `repeat(${grid}, 1fr)` }}>
-      {tiles.map((origIndex, pos) => {
-        const x = origIndex % grid;
-        const y = Math.floor(origIndex / grid);
-        const bgSize = `${grid * 100}% ${grid * 100}%`;
-        const bgPos = `${(x * 100) / (grid - 1)}% ${(y * 100) / (grid - 1)}%`;
-        const isSel = selected === pos;
-        return (
-          <button key={pos} onClick={() => onTileClick(pos)} className={`relative overflow-hidden border transition-transform ${isSel ? "ring-2 ring-indigo-500 z-10 scale-[0.98]" : "hover:scale-[0.99]"}`} style={{ aspectRatio: "1/1" }}>
-            <div className="absolute inset-0 bg-center bg-no-repeat" style={{ backgroundImage: `url("${imgUrl}")`, backgroundSize: bgSize, backgroundPosition: bgPos }} />
-          </button>
-        );
-      })}
+    <div className="w-full h-full flex flex-col">
+      {/* Top row with letters */}
+      {showCoordinates && (
+        <div className="flex" style={{ height: '24px' }}>
+          <div className="w-6"></div> {/* Empty corner */}
+          {letters.map((letter) => (
+            <div key={letter} className="flex-1 flex items-center justify-center text-xs font-medium text-gray-600 bg-gray-50 border-b border-r">
+              {letter}
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Grid with numbers on left */}
+      <div className="flex flex-1">
+        {/* Left column with numbers */}
+        {showCoordinates && (
+          <div className="flex flex-col w-6">
+            {numbers.map((num) => (
+              <div key={num} className="flex-1 flex items-center justify-center text-xs font-medium text-gray-600 bg-gray-50 border-r">
+                {num}
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Main grid */}
+        <div className={`grid ${showCoordinates ? 'flex-1' : 'w-full h-full'}`} style={{ gridTemplateColumns: `repeat(${grid}, 1fr)`, gridTemplateRows: `repeat(${grid}, 1fr)` }}>
+          {tiles.map((origIndex, pos) => {
+            const x = origIndex % grid;
+            const y = Math.floor(origIndex / grid);
+            const bgSize = `${grid * 100}% ${grid * 100}%`;
+            const bgPos = `${(x * 100) / (grid - 1)}% ${(y * 100) / (grid - 1)}%`;
+            const isSel = selected === pos;
+            
+            // Check if this tile is selected by other players
+            const otherPlayerSelections = Object.entries(otherSelections).filter(([playerName, tilePos]) => tilePos === pos);
+            const otherPlayerColor = otherPlayerSelections.length > 0 ? playerColors[otherPlayerSelections[0][0].length % playerColors.length] : "";
+            
+            let ringClass = "";
+            if (isSel) {
+              ringClass = "ring-2 ring-indigo-500 z-10 scale-[0.98]";
+            } else if (otherPlayerColor) {
+              ringClass = `${otherPlayerColor} z-5 scale-[0.97]`;
+            }
+            
+            return (
+              <button key={pos} onClick={() => onTileClick(pos)} className={`relative overflow-hidden border transition-transform ${ringClass || "hover:scale-[0.99]"}`} style={{ aspectRatio: "1/1" }}>
+                <div className="absolute inset-0 bg-center bg-no-repeat" style={{ backgroundImage: `url("${imgUrl}")`, backgroundSize: bgSize, backgroundPosition: bgPos }} />
+                {otherPlayerSelections.length > 0 && (
+                  <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-white border border-gray-300 opacity-80"></div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
