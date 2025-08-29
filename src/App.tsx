@@ -39,6 +39,7 @@ export default function App({
   const [otherSelections, setOtherSelections] = useState<{[playerName: string]: number | null}>({});
   const [otherCursors, setOtherCursors] = useState<{[playerName: string]: {x: number, y: number} | null}>({});
   const [showCoordinates, setShowCoordinates] = useState<boolean>(true);
+  const [showCursors, setShowCursors] = useState<boolean>(true);
   const [moves, setMoves] = useState<number>(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [completedAt, setCompletedAt] = useState<number | null>(null);
@@ -127,22 +128,32 @@ export default function App({
 
   // Track cursor position and broadcast to other players
   useEffect(() => {
-    if (!supabase || !roomId || !subscribed) return;
+    if (!supabase || !roomId || !subscribed || !showCursors) return;
     
-    let timeoutId: NodeJS.Timeout;
+    let animationFrameId: number;
+    let lastBroadcastTime = 0;
+    const BROADCAST_INTERVAL = 16; // 60fps
+    
     const onMouseMove = (e: Event) => {
       const mouseEvent = e as MouseEvent;
       const target = e.currentTarget as HTMLElement;
       if (!target) return;
       
-      // Throttle cursor updates to avoid spam
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        const rect = target.getBoundingClientRect();
-        const x = mouseEvent.clientX - rect.left;
-        const y = mouseEvent.clientY - rect.top;
-        broadcast({ type: "cursor", x, y, by: name });
-      }, 50); // Update every 50ms max
+      // Use requestAnimationFrame for smooth updates
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      
+      animationFrameId = requestAnimationFrame(() => {
+        const now = Date.now();
+        if (now - lastBroadcastTime >= BROADCAST_INTERVAL) {
+          const rect = target.getBoundingClientRect();
+          const x = mouseEvent.clientX - rect.left;
+          const y = mouseEvent.clientY - rect.top;
+          broadcast({ type: "cursor", x, y, by: name });
+          lastBroadcastTime = now;
+        }
+      });
     };
 
     const onMouseLeave = () => {
@@ -156,7 +167,9 @@ export default function App({
       return () => {
         puzzleElement.removeEventListener('mousemove', onMouseMove);
         puzzleElement.removeEventListener('mouseleave', onMouseLeave);
-        clearTimeout(timeoutId);
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
       };
     }
   }, [supabase, roomId, subscribed, name]);
@@ -499,6 +512,22 @@ export default function App({
               />
             </button>
           </div>
+          <div className="px-4 py-2 rounded-2xl bg-white border shadow-sm inline-flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full bg-blue-500"></div>
+            <span className="text-sm">Cursors</span>
+            <button 
+              onClick={() => setShowCursors(!showCursors)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                showCursors ? 'bg-blue-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  showCursors ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
           {best && (<div className="px-4 py-2 rounded-2xl bg-white border shadow-sm text-sm">Best ({grid}×{grid}): {best.time}s / {best.moves} moves</div>)}
         </div>
 
@@ -542,7 +571,7 @@ export default function App({
               </div>
             </div>
           ) : (
-            <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} otherSelections={otherSelections} otherCursors={otherCursors} showCoordinates={showCoordinates} onTileClick={handleTileClick} />
+            <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} otherSelections={otherSelections} otherCursors={otherCursors} showCoordinates={showCoordinates} showCursors={showCursors} onTileClick={handleTileClick} />
           )}
         </motion.div>
 
@@ -597,7 +626,7 @@ export default function App({
   );
 }
 
-function TileGrid({ imgUrl, order, grid, selected, otherSelections, otherCursors, showCoordinates, onTileClick }: { imgUrl: string; order: number[]; grid: number; selected: number | null; otherSelections: {[playerName: string]: number | null}; otherCursors: {[playerName: string]: {x: number, y: number} | null}; showCoordinates: boolean; onTileClick: (i: number) => void; }) {
+function TileGrid({ imgUrl, order, grid, selected, otherSelections, otherCursors, showCoordinates, showCursors, onTileClick }: { imgUrl: string; order: number[]; grid: number; selected: number | null; otherSelections: {[playerName: string]: number | null}; otherCursors: {[playerName: string]: {x: number, y: number} | null}; showCoordinates: boolean; showCursors: boolean; onTileClick: (i: number) => void; }) {
   const tiles = order;
   
   // Color mapping for different players
@@ -672,7 +701,7 @@ function TileGrid({ imgUrl, order, grid, selected, otherSelections, otherCursors
           })}
           
           {/* Cursor indicators for other players */}
-          {Object.entries(otherCursors).map(([playerName, cursorPos]) => {
+          {showCursors && Object.entries(otherCursors).map(([playerName, cursorPos]) => {
             if (!cursorPos) return null;
             const colorIndex = playerName.length % playerColors.length;
             const colorClass = playerColors[colorIndex].replace('ring-2 ', '').replace('ring-', 'bg-');
@@ -680,7 +709,7 @@ function TileGrid({ imgUrl, order, grid, selected, otherSelections, otherCursors
             return (
               <div
                 key={playerName}
-                className={`absolute w-3 h-3 rounded-full border-2 border-white shadow-lg pointer-events-none z-20 ${colorClass}`}
+                className={`absolute w-3 h-3 rounded-full border-2 border-white shadow-lg pointer-events-none z-20 transition-all duration-75 ease-out ${colorClass}`}
                 style={{
                   left: `${cursorPos.x - 6}px`,
                   top: `${cursorPos.y - 6}px`,
