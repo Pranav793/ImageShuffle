@@ -37,6 +37,7 @@ export default function App({
   const [order, setOrder] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [otherSelections, setOtherSelections] = useState<{[playerName: string]: number | null}>({});
+  const [otherCursors, setOtherCursors] = useState<{[playerName: string]: {x: number, y: number} | null}>({});
   const [showCoordinates, setShowCoordinates] = useState<boolean>(true);
   const [moves, setMoves] = useState<number>(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
@@ -124,6 +125,42 @@ export default function App({
     return () => window.removeEventListener("paste", onPaste as any);
   }, [roomId, isHost, supabase]);
 
+  // Track cursor position and broadcast to other players
+  useEffect(() => {
+    if (!supabase || !roomId || !subscribed) return;
+    
+    let timeoutId: NodeJS.Timeout;
+    const onMouseMove = (e: Event) => {
+      const mouseEvent = e as MouseEvent;
+      const target = e.currentTarget as HTMLElement;
+      if (!target) return;
+      
+      // Throttle cursor updates to avoid spam
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        const rect = target.getBoundingClientRect();
+        const x = mouseEvent.clientX - rect.left;
+        const y = mouseEvent.clientY - rect.top;
+        broadcast({ type: "cursor", x, y, by: name });
+      }, 50); // Update every 50ms max
+    };
+
+    const onMouseLeave = () => {
+      broadcast({ type: "cursor", x: null, y: null, by: name });
+    };
+
+    const puzzleElement = document.querySelector('[data-puzzle-board]');
+    if (puzzleElement) {
+      puzzleElement.addEventListener('mousemove', onMouseMove);
+      puzzleElement.addEventListener('mouseleave', onMouseLeave);
+      return () => {
+        puzzleElement.removeEventListener('mousemove', onMouseMove);
+        puzzleElement.removeEventListener('mouseleave', onMouseLeave);
+        clearTimeout(timeoutId);
+      };
+    }
+  }, [supabase, roomId, subscribed, name]);
+
   // Completion: record + confetti + broadcast
   useEffect(() => {
     if (!solved || !startedAt || completedAt) return;
@@ -184,6 +221,8 @@ export default function App({
         setSelected(null); // Clear any local selection when someone else makes a move
         // Clear other selections when someone makes a move
         setOtherSelections({});
+        // Clear cursors when someone makes a move
+        setOtherCursors({});
       }
     });
     ch.on("broadcast", { event: "select" }, (evt) => {
@@ -193,6 +232,24 @@ export default function App({
           ...prev,
           [msg.by]: msg.index
         }));
+      }
+    });
+    ch.on("broadcast", { event: "cursor" }, (evt) => {
+      const msg = evt.payload; console.log("[rx] cursor", msg);
+      if (msg?.by && msg.by !== name) {
+        if (msg.x !== undefined && msg.y !== undefined && msg.x !== null && msg.y !== null) {
+          setOtherCursors(prev => ({
+            ...prev,
+            [msg.by]: { x: msg.x, y: msg.y }
+          }));
+        } else {
+          // Clear cursor when player leaves the area
+          setOtherCursors(prev => {
+            const newCursors = { ...prev };
+            delete newCursors[msg.by];
+            return newCursors;
+          });
+        }
       }
     });
 
@@ -446,7 +503,14 @@ export default function App({
         </div>
 
         {/* Board with big congrats */}
-        <motion.div initial={false} animate={solved ? { scale: 1.05 } : { scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 12 }} className={`relative rounded-2xl overflow-hidden mx-auto transition-all border ${solved ? "ring-8 ring-green-400/80 shadow-2xl shadow-green-300/50" : "bg-white shadow"}`} style={{ width: "min(90vw, 720px)", aspectRatio: "1/1" }}>
+        <motion.div 
+          data-puzzle-board
+          initial={false} 
+          animate={solved ? { scale: 1.05 } : { scale: 1 }} 
+          transition={{ type: "spring", stiffness: 300, damping: 12 }} 
+          className={`relative rounded-2xl overflow-hidden mx-auto transition-all border ${solved ? "ring-8 ring-green-400/80 shadow-2xl shadow-green-300/50" : "bg-white shadow"}`} 
+          style={{ width: "min(90vw, 720px)", aspectRatio: "1/1" }}
+        >
           {/* Overlay when solved */}
           <AnimatePresence>
             {solved && (
@@ -478,7 +542,7 @@ export default function App({
               </div>
             </div>
           ) : (
-            <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} otherSelections={otherSelections} showCoordinates={showCoordinates} onTileClick={handleTileClick} />
+            <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} otherSelections={otherSelections} otherCursors={otherCursors} showCoordinates={showCoordinates} onTileClick={handleTileClick} />
           )}
         </motion.div>
 
@@ -533,7 +597,7 @@ export default function App({
   );
 }
 
-function TileGrid({ imgUrl, order, grid, selected, otherSelections, showCoordinates, onTileClick }: { imgUrl: string; order: number[]; grid: number; selected: number | null; otherSelections: {[playerName: string]: number | null}; showCoordinates: boolean; onTileClick: (i: number) => void; }) {
+function TileGrid({ imgUrl, order, grid, selected, otherSelections, otherCursors, showCoordinates, onTileClick }: { imgUrl: string; order: number[]; grid: number; selected: number | null; otherSelections: {[playerName: string]: number | null}; otherCursors: {[playerName: string]: {x: number, y: number} | null}; showCoordinates: boolean; onTileClick: (i: number) => void; }) {
   const tiles = order;
   
   // Color mapping for different players
@@ -578,7 +642,7 @@ function TileGrid({ imgUrl, order, grid, selected, otherSelections, showCoordina
         )}
         
         {/* Main grid */}
-        <div className={`grid ${showCoordinates ? 'flex-1' : 'w-full h-full'}`} style={{ gridTemplateColumns: `repeat(${grid}, 1fr)`, gridTemplateRows: `repeat(${grid}, 1fr)` }}>
+        <div className={`relative grid ${showCoordinates ? 'flex-1' : 'w-full h-full'}`} style={{ gridTemplateColumns: `repeat(${grid}, 1fr)`, gridTemplateRows: `repeat(${grid}, 1fr)` }}>
           {tiles.map((origIndex, pos) => {
             const x = origIndex % grid;
             const y = Math.floor(origIndex / grid);
@@ -604,6 +668,25 @@ function TileGrid({ imgUrl, order, grid, selected, otherSelections, showCoordina
                   <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-white border border-gray-300 opacity-80"></div>
                 )}
               </button>
+            );
+          })}
+          
+          {/* Cursor indicators for other players */}
+          {Object.entries(otherCursors).map(([playerName, cursorPos]) => {
+            if (!cursorPos) return null;
+            const colorIndex = playerName.length % playerColors.length;
+            const colorClass = playerColors[colorIndex].replace('ring-2 ', '').replace('ring-', 'bg-');
+            
+            return (
+              <div
+                key={playerName}
+                className={`absolute w-3 h-3 rounded-full border-2 border-white shadow-lg pointer-events-none z-20 ${colorClass}`}
+                style={{
+                  left: `${cursorPos.x - 6}px`,
+                  top: `${cursorPos.y - 6}px`,
+                  transform: 'translate(-50%, -50%)'
+                }}
+              />
             );
           })}
         </div>
