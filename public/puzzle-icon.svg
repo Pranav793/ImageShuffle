@@ -1,0 +1,12 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="15" fill="#8B5CF6" stroke="#7C3AED" stroke-width="2"/>
+  
+  <!-- Puzzle pieces -->
+  <path d="M8 8 L12 8 L12 12 L16 12 L16 16 L12 16 L12 20 L8 20 L8 16 L4 16 L4 12 L8 12 Z" fill="#F3F4F6"/>
+  <path d="M20 8 L24 8 L24 12 L20 12 L20 16 L24 16 L24 20 L20 20 L20 16 L16 16 L16 12 L20 12 Z" fill="#E5E7EB"/>
+  <path d="M8 20 L12 20 L12 24 L16 24 L16 20 L20 20 L20 24 L24 24 L24 20 L20 20 L20 16 L16 16 L16 20 Z" fill="#D1D5DB"/>
+  
+  <!-- Heart in center -->
+  <path d="M14 18 C14 17 15 16 16 16 C17 16 18 17 18 18 C18 19 16 20 16 20 C16 20 14 19 14 18 Z" fill="#EF4444"/>
+</svg>
