@@ -2,6 +2,8 @@
 
 A quick multiplayer puzzle game I invented because I love my girlfriend.
 
+**🎮 Play now: [image-shuffle.vercel.app](https://image-shuffle.vercel.app)**
+
 ## What is it?
 
 Upload an image, watch it get shuffled into tiles, then work together with your partner to swap tiles back to their original positions. The first person to solve it wins!
@@ -24,7 +26,7 @@ Upload an image, watch it get shuffled into tiles, then work together with your 
 
 ## Tech
 
-Built with React, TypeScript, Supabase (for real-time), and lots of love ❤️
+Built with React, TypeScript, Vite, Supabase (for real-time), Vercel (deployment), and lots of love ❤️
 
 ---
 
