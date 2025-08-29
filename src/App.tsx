@@ -40,6 +40,8 @@ export default function App({
   const [otherCursors, setOtherCursors] = useState<{[playerName: string]: {x: number, y: number} | null}>({});
   const [showCoordinates, setShowCoordinates] = useState<boolean>(true);
   const [showCursors, setShowCursors] = useState<boolean>(true);
+  const [showPreview, setShowPreview] = useState<boolean>(false);
+  const [otherShowPreview, setOtherShowPreview] = useState<{[playerName: string]: boolean}>({});
   const [moves, setMoves] = useState<number>(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [completedAt, setCompletedAt] = useState<number | null>(null);
@@ -236,6 +238,8 @@ export default function App({
         setOtherSelections({});
         // Clear cursors when someone makes a move
         setOtherCursors({});
+        // Clear other preview states when someone makes a move
+        setOtherShowPreview({});
       }
     });
     ch.on("broadcast", { event: "select" }, (evt) => {
@@ -265,6 +269,15 @@ export default function App({
         }
       }
     });
+    ch.on("broadcast", { event: "previewToggle" }, (evt) => {
+      const msg = evt.payload; console.log("[rx] previewToggle", msg);
+      if (msg?.by && msg.by !== name) {
+        setOtherShowPreview(prev => ({
+          ...prev,
+          [msg.by]: msg.show
+        }));
+      }
+    });
 
     ch.on("broadcast", { event: "chat" },   (evt) => { const msg = evt.payload; console.log("[rx] chat", msg); if (msg?.message) setMessages((m) => [...m, msg.message]); });
     ch.on("broadcast", { event: "hello" },  (evt) => { const msg = evt.payload; console.log("[rx] hello", msg); if (imgUrl) { const timestamp = Date.now(); setLastStateTimestamp(timestamp); ch.send({ type: "broadcast", event: "state", payload: { type: "state", state: snapshot(), timestamp } }); } });
@@ -281,6 +294,8 @@ export default function App({
         setStartedAt(Date.now());
         setCompletedAt(null);
         hasFiredConfettiRef.current = false;
+        // Clear other preview states when reshuffling
+        setOtherShowPreview({});
       }
     });
     ch.on("broadcast", { event: "reset" }, (evt) => {
@@ -293,6 +308,8 @@ export default function App({
         setStartedAt(Date.now());
         setCompletedAt(null);
         hasFiredConfettiRef.current = false;
+        // Clear other preview states when resetting
+        setOtherShowPreview({});
       }
     });
     ch.on("broadcast", { event: "complete" }, (evt) => {
@@ -528,18 +545,39 @@ export default function App({
               />
             </button>
           </div>
+          <div className="px-4 py-2 rounded-2xl bg-white border shadow-sm inline-flex items-center gap-2">
+            <ImageIcon className="w-4 h-4"/>
+            <span className="text-sm">Preview</span>
+            <button 
+              onClick={() => {
+                const newState = !showPreview;
+                setShowPreview(newState);
+                broadcast({ type: "previewToggle", show: newState, by: name });
+              }}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                showPreview ? 'bg-green-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  showPreview ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
           {best && (<div className="px-4 py-2 rounded-2xl bg-white border shadow-sm text-sm">Best ({grid}×{grid}): {best.time}s / {best.moves} moves</div>)}
         </div>
 
         {/* Board with big congrats */}
-        <motion.div 
-          data-puzzle-board
-          initial={false} 
-          animate={solved ? { scale: 1.05 } : { scale: 1 }} 
-          transition={{ type: "spring", stiffness: 300, damping: 12 }} 
-          className={`relative rounded-2xl overflow-hidden mx-auto transition-all border ${solved ? "ring-8 ring-green-400/80 shadow-2xl shadow-green-300/50" : "bg-white shadow"}`} 
-          style={{ width: "min(90vw, 720px)", aspectRatio: "1/1" }}
-        >
+        <div className="flex gap-4 items-start justify-center">
+          <motion.div 
+            data-puzzle-board
+            initial={false} 
+            animate={solved ? { scale: 1.05 } : { scale: 1 }} 
+            transition={{ type: "spring", stiffness: 300, damping: 12 }} 
+            className={`relative rounded-2xl overflow-hidden transition-all border ${solved ? "ring-8 ring-green-400/80 shadow-2xl shadow-green-300/50" : "bg-white shadow"}`} 
+            style={{ width: "min(90vw, 720px)", aspectRatio: "1/1" }}
+          >
           {/* Overlay when solved */}
           <AnimatePresence>
             {solved && (
@@ -570,10 +608,36 @@ export default function App({
                 <p className="text-sm">Upload an image to begin the game.</p>
               </div>
             </div>
-          ) : (
-            <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} otherSelections={otherSelections} otherCursors={otherCursors} showCoordinates={showCoordinates} showCursors={showCursors} onTileClick={handleTileClick} />
-          )}
-        </motion.div>
+                      ) : (
+              <TileGrid imgUrl={imgUrl} order={order} grid={grid} selected={selected} otherSelections={otherSelections} otherCursors={otherCursors} showCoordinates={showCoordinates} showCursors={showCursors} onTileClick={handleTileClick} />
+            )}
+          </motion.div>
+          
+          {/* Preview image */}
+          <AnimatePresence>
+            {(showPreview || Object.values(otherShowPreview).some(Boolean)) && imgUrl && (
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ type: "spring", damping: 20, stiffness: 200 }}
+                className="hidden lg:block w-48 h-48 rounded-2xl overflow-hidden border shadow-lg bg-white"
+              >
+                <div className="relative w-full h-full">
+                  <img 
+                    src={imgUrl} 
+                    alt="Puzzle reference" 
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent"></div>
+                  <div className="absolute bottom-2 left-2 text-xs text-white font-medium drop-shadow bg-black/30 px-2 py-1 rounded">
+                    Reference
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
         {/* Completed banner (secondary) */}
         <AnimatePresence>
